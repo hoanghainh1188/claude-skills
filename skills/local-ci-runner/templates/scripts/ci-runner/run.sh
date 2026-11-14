@@ -39,6 +39,9 @@ if ! mkdir "$LOCK" 2>/dev/null; then
 fi
 echo $$ > "$LOCK/pid"
 
+# compose.yml requires these; `down` and `stop` need any value to read the file, or
+# they fail (silently here) and leave the container behind.
+export REPO_URL=${REPO_URL:-unused} RUNNER_TOKEN=${RUNNER_TOKEN:-unused} RUNNER_NAME=${RUNNER_NAME:-unused}
 stop_containers() { "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true; }
 cleanup() { stop_containers; rm -rf "$LOCK"; }
 trap cleanup EXIT
