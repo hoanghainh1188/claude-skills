@@ -60,6 +60,10 @@ cần Linux x64 (khi PR có nhãn `__HOSTED_LABEL__`) và workflow có secret th
 
 - Gọi lệnh hai lần không sao: lần sau thấy lần trước đang chạy thì thoát.
 - Docker Desktop đang tắt thì script tự mở (macOS).
+- Dọn sạch máy: `__RUN_CMD__:clean` xóa image và volume cache của runner (lần
+  sau build lại từ đầu). Muốn mỗi lượt chạy xong đều dọn: đặt
+  `export CI_RUNNER_CLEAN=1` trong `~/.zshrc` (hook chạy nền cũng đọc biến này).
+  Cache build của Docker dùng chung mọi dự án nên giữ lại (`docker builder prune`).
 - Dừng giữa chừng: `Ctrl+C`, hoặc `docker compose -p __SLUG__-ci-runner down`.
 
 ## 5. Khi có trục trặc

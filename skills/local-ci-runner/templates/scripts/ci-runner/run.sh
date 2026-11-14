@@ -3,6 +3,9 @@
 # stops (docs/ops/ci-runner.md). Safe to start twice: the second one exits.
 #
 #   npm run ci:runner        (or: bash scripts/ci-runner/run.sh)
+#   npm run ci:runner:clean  (or: run.sh --clean) remove the image and cache volumes now
+#   CI_RUNNER_CLEAN=1 ...  same, after the last job of this run: nothing left
+#                          behind, but the next run builds and downloads all again
 #
 # Needs Docker and a signed-in GitHub CLI (`gh auth login`) on an account
 # that administers the repository. Written for the bash 3.2 of macOS.
@@ -19,6 +22,14 @@ POLL_SECONDS=15
 # How long to wait with no CI run in sight before giving up. A push takes a
 # moment to show up as a run.
 IDLE_SECONDS=${CI_RUNNER_IDLE_SECONDS:-180}
+# 1: remove the image and the cache volumes when this run ends.
+CLEAN=${CI_RUNNER_CLEAN:-0}
+CLEAN_ONLY=0
+case "${1:-}" in
+  "") ;;
+  --clean) CLEAN=1; CLEAN_ONLY=1 ;;
+  *) echo "Usage: run.sh [--clean]" >&2; exit 2 ;;
+esac
 LOCK="${TMPDIR:-/tmp}/__SLUG__-ci-runner.lock"
 COMPOSE=(docker compose -p __SLUG__-ci-runner -f "$ROOT/docker/ci-runner/compose.yml")
 
@@ -43,7 +54,20 @@ echo $$ > "$LOCK/pid"
 # they fail (silently here) and leave the container behind.
 export REPO_URL=${REPO_URL:-unused} RUNNER_TOKEN=${RUNNER_TOKEN:-unused} RUNNER_NAME=${RUNNER_NAME:-unused}
 stop_containers() { "${COMPOSE[@]}" down --remove-orphans >/dev/null 2>&1 || true; }
-cleanup() { stop_containers; rm -rf "$LOCK"; }
+# Everything this runner left on the machine: containers, network, the cache volumes,
+# the built image and its base image. Docker's build cache is shared by every
+# project, so it stays (`docker builder prune` clears it).
+purge() {
+  local base
+  "${COMPOSE[@]}" down --remove-orphans --volumes --rmi all >/dev/null 2>&1 || true
+  base=$(awk 'toupper($1) == "FROM" { print $2; exit }' "$ROOT/docker/ci-runner/Dockerfile")
+  if [ -n "$base" ]; then docker image rm "$base" >/dev/null 2>&1 || true; fi
+  log "Đã dọn image và volume cache của runner."
+}
+cleanup() {
+  if [ "$CLEAN" = 1 ] && docker info >/dev/null 2>&1; then purge; else stop_containers; fi
+  rm -rf "$LOCK"
+}
 trap cleanup EXIT
 trap 'exit 130' INT TERM
 
@@ -142,6 +166,7 @@ run_one_job() {
 }
 
 ensure_docker
+if [ "$CLEAN_ONLY" = 1 ]; then exit 0; fi  # the EXIT trap purges
 log "Chờ việc CI của $REPO (nhãn $LABEL)..."
 idle=0
 while :; do
