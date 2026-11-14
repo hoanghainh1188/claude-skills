@@ -37,6 +37,10 @@ runner: đổi `runs-on` về `ubuntu-latest` trước.
 - Hook `pre-push` gọi `start-background.sh` (nohup, log ở
   `~/Library/Logs/<repo>-ci-runner.log`), không bao giờ chặn push.
 - Khóa thư mục trong `$TMPDIR` để mỗi máy chỉ một vòng lặp.
+- Dọn: mỗi job xong thì `docker compose down` (container, mạng). Image và
+  volume cache giữ lại cho lần sau nhanh. `ci:runner:clean` (`run.sh --clean`)
+  xóa luôn image, image gốc và volume; `CI_RUNNER_CLEAN=1` làm việc đó khi mỗi
+  lượt chạy xong (máy sạch, nhưng lần sau build và tải lại từ đầu).
 - Container: không Docker socket, không mount thư mục máy, không mở cổng;
   chỉ volume cache npm và Playwright.
 
@@ -89,7 +93,8 @@ Chỉ đọc workflow, không đổi job có secret. Nếu không chắc job nà
 5. **Thêm lệnh**:
    - Repo Node: thêm vào `package.json` → `scripts`:
      `"ci:runner": "bash scripts/ci-runner/run.sh"`,
-     `"ci:runner:hook": "bash scripts/ci-runner/install-hook.sh"`.
+     `"ci:runner:hook": "bash scripts/ci-runner/install-hook.sh"`,
+     `"ci:runner:clean": "bash scripts/ci-runner/run.sh --clean"`.
    - Không Node: dùng `Makefile` (`ci-runner:` / `ci-runner-hook:`) hoặc gọi
      thẳng `bash scripts/ci-runner/run.sh`. Docs dùng lệnh tương ứng
      (`install.sh` tự chọn khi không có `package.json`).
