@@ -1,0 +1,24 @@
+# Local CI runner (docs/ops/ci-runner.md). Started by scripts/ci-runner/run.sh,
+# one job at a time; never left running. Variant without a database.
+services:
+  runner:
+    build:
+      context: .
+      args:
+        NODE_MAJOR: ${NODE_MAJOR:-}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-}
+        PLAYWRIGHT_BROWSERS: ${PLAYWRIGHT_BROWSERS:-chromium}
+    # The runner gets no Docker socket and no folder of the Mac.
+    shm_size: 1gb
+    environment:
+      REPO_URL: ${REPO_URL:?}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+      RUNNER_REMOVE_TOKEN: ${RUNNER_REMOVE_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:?}
+    volumes:
+      - npm-cache:/home/runner/.npm
+      - playwright-cache:/home/runner/.cache/ms-playwright
+
+volumes:
+  npm-cache:
+  playwright-cache:

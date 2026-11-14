@@ -1,0 +1,46 @@
+# Local CI runner (docs/ops/ci-runner.md). Started by scripts/ci-runner/run.sh,
+# one job at a time; never left running.
+services:
+  # A fresh database for every job: the data lives in memory.
+  postgres:
+    image: __POSTGRES_IMAGE__
+    environment:
+      POSTGRES_USER: __DB_USER__
+      POSTGRES_PASSWORD: __DB_PASSWORD__
+      POSTGRES_DB: __DB_NAME__
+      TZ: UTC
+    tmpfs:
+      - /var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U __DB_USER__ -d __DB_NAME__"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  runner:
+    build:
+      context: .
+      args:
+        NODE_MAJOR: ${NODE_MAJOR:-}
+        PLAYWRIGHT_VERSION: ${PLAYWRIGHT_VERSION:-}
+        PLAYWRIGHT_BROWSERS: ${PLAYWRIGHT_BROWSERS:-chromium}
+    # Shares the database's network so tests reach it at localhost:5432, as
+    # on GitHub's machines. No port is published on the Mac, and the runner
+    # gets no Docker socket and no folder of the Mac.
+    network_mode: "service:postgres"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    shm_size: 1gb
+    environment:
+      REPO_URL: ${REPO_URL:?}
+      RUNNER_TOKEN: ${RUNNER_TOKEN:?}
+      RUNNER_REMOVE_TOKEN: ${RUNNER_REMOVE_TOKEN:-}
+      RUNNER_NAME: ${RUNNER_NAME:?}
+    volumes:
+      - npm-cache:/home/runner/.npm
+      - playwright-cache:/home/runner/.cache/ms-playwright
+
+volumes:
+  npm-cache:
+  playwright-cache:

@@ -1,0 +1,108 @@
+# EXAMPLE, not a drop-in file: shows the shape of a PR workflow whose jobs all
+# run on the local runner. Adapt the repo's own .github/workflows/ci.yml to it
+# (see SKILL.md, "Workflow checklist").
+name: CI
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  CI: "true"
+  # Throwaway values for the CI-only database; never real secrets.
+  # DATABASE_URL: postgres://__DB_USER__:__DB_PASSWORD__@localhost:5432/__DB_NAME__
+
+# Where jobs run (docs/ops/ci-runner.md): every job here runs on the owner's
+# machine, in Docker, on a one-job runner labelled __LABEL__ that
+# `npm run ci:runner` starts, so a PR uses no GitHub minutes. Its image has
+# Node, the GitHub CLI and the browsers' system packages, and (if any) shares
+# its network with a fresh database, so jobs have no setup-node and no
+# `services:`.
+jobs:
+  # Optional: docs-only changes skip every other job (a skipped job counts as
+  # passed). Uses the gh CLI baked into the runner image.
+  changes:
+    name: Detect code changes
+    runs-on: [self-hosted, __LABEL__]
+    timeout-minutes: 2
+    permissions:
+      pull-requests: read
+    outputs:
+      code: ${{ steps.filter.outputs.code }}
+    steps:
+      - id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+        run: |
+          if [ -z "$PR" ]; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          files=$(gh api --paginate "repos/$GITHUB_REPOSITORY/pulls/$PR/files" --jq '.[].filename')
+          if grep -qvE '^(docs/|\.claude/|CLAUDE\.md$|AGENTS\.md$|README\.md$)' <<< "$files"; then
+            echo "code=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "code=false" >> "$GITHUB_OUTPUT"
+            echo "Docs-only change: tests skipped." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+  static:
+    name: Lint, types, unit, build
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: [self-hosted, __LABEL__]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      # The image is built from __NODE_VERSION_FILE__; fail loudly if it drifted.
+      - name: Check the runner image's Node
+        run: test "$(node --version | cut -d. -f1)" = "v$(tr -d 'v \n' < __NODE_VERSION_FILE__ | cut -d. -f1)"
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+  # Playwright: browsers download into the cached volume; system packages are
+  # already in the image. Edge/Chrome have no Linux arm64 build: use the
+  # chromium channel locally and keep branded-browser jobs on GitHub.
+  e2e:
+    name: E2E
+    needs: changes
+    if: needs.changes.outputs.code == 'true'
+    runs-on: [self-hosted, __LABEL__]
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+      - run: npm ci
+      - run: npx playwright install chromium
+      - run: npx playwright test
+      - name: Upload report
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-report
+          path: playwright-report/
+          retention-days: 7
+
+  # A gate keeps the required check name stable while the jobs behind it
+  # change. Runs locally too (a few seconds).
+  gate:
+    name: Checks
+    needs: [changes, static, e2e]
+    if: ${{ !cancelled() && needs.changes.outputs.code != 'false' }}
+    runs-on: [self-hosted, __LABEL__]
+    timeout-minutes: 2
+    steps:
+      - env:
+          RESULTS: ${{ needs.changes.result }} ${{ needs.static.result }} ${{ needs.e2e.result }}
+        run: |
+          echo "Results: $RESULTS"
+          case "$RESULTS" in *failure*|*cancelled*) exit 1 ;; esac

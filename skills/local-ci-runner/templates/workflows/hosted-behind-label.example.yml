@@ -1,0 +1,37 @@
+# EXAMPLE: a job that must stay on GitHub's machines (needs Linux x64, a
+# branded browser, exact screenshot baselines...) runs only for PRs carrying
+# the __HOSTED_LABEL__ label, or from the Actions tab, to keep free minutes.
+# Not a required check. Create the label once:
+#   gh label create __HOSTED_LABEL__ --description "Run the hosted-only checks"
+name: Hosted checks
+
+on:
+  workflow_dispatch:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+
+concurrency:
+  group: hosted-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  hosted:
+    name: Hosted-only check
+    # A push to a labelled PR runs it again; another label added does not.
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (contains(github.event.pull_request.labels.*.name, '__HOSTED_LABEL__') &&
+      (github.event.action != 'labeled' || github.event.label.name == '__HOSTED_LABEL__'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: __NODE_VERSION_FILE__
+          cache: npm
+      - run: npm ci
+      # ...the x64-only steps (e.g. npx playwright install --with-deps msedge)
